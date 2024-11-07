@@ -6,7 +6,7 @@ import argparse
 import itertools
 from collections import Counter
 from collections import deque
-
+import math
 import cv2 as cv
 import numpy as np
 import mediapipe as mp
@@ -14,6 +14,32 @@ import mediapipe as mp
 from utils import CvFpsCalc
 from model import KeyPointClassifier
 from model import PointHistoryClassifier
+
+import pyautogui
+import keyboard
+import time
+
+def resetZoom():
+    pyautogui.hotkey('ctrl', '0')
+    print("reset")
+    time.sleep(0.1)
+
+
+def zoom_in():
+    # Press and hold Ctrl while scrolling up
+    keyboard.press('ctrl')
+    pyautogui.scroll(100)  # Scroll up to zoom in
+    keyboard.release('ctrl')
+    print("Zoom in")
+    time.sleep(0.1)
+
+def zoom_out():
+    # Press and hold Ctrl while scrolling down
+    keyboard.press('ctrl')
+    pyautogui.scroll(-100)  # Scroll down to zoom out
+    keyboard.release('ctrl')
+    print("Zoom out")
+    time.sleep(0.1)
 
 
 def get_args():
@@ -41,7 +67,7 @@ def get_args():
 def main():
     # Argument parsing #################################################################
     args = get_args()
-
+    prev_distance = None
     cap_device = args.device
     cap_width = args.width
     cap_height = args.height
@@ -120,16 +146,25 @@ def main():
         image.flags.writeable = False
         results = hands.process(image)
         image.flags.writeable = True
+        
 
         #  ####################################################################
         if results.multi_hand_landmarks is not None:
             for hand_landmarks, handedness in zip(results.multi_hand_landmarks,
                                                   results.multi_handedness):
+                thumb_tip = hand_landmarks.landmark[4]
+                index_tip = hand_landmarks.landmark[8]
+
+                # Convert normalized coordinates to pixel values
+                height, width, _ = image.shape
+                x1, y1 = int(thumb_tip.x * width), int(thumb_tip.y * height)
+                x2, y2 = int(index_tip.x * width), int(index_tip.y * height)
+                
                 # Bounding box calculation
                 brect = calc_bounding_rect(debug_image, hand_landmarks)
                 # Landmark calculation
                 landmark_list = calc_landmark_list(debug_image, hand_landmarks)
-
+                
                 # Conversion to relative coordinates / normalized coordinates
                 pre_processed_landmark_list = pre_process_landmark(
                     landmark_list)
@@ -157,7 +192,28 @@ def main():
                 finger_gesture_history.append(finger_gesture_id)
                 most_common_fg_id = Counter(
                     finger_gesture_history).most_common()
+                if(keypoint_classifier_labels[hand_sign_id]=="Open"):
+                    # Extract thumb tip (landmark 4) and index tip (landmark 8)
+            
+                    # Draw a line between the thumb and index fingers
+                    cv.line(image, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Green line
+                    # Calculate the Euclidean distance between thumb and index finger
+                    distance = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
+                    # If this is the first frame, set the initial distance
+                    if prev_distance is None:
+                        prev_distance = distance
+                    # Compare with the previous distance and zoom in or out
+                    if distance > prev_distance and distance-prev_distance>4:  # Zoom in
+                        zoom_in()
+                    elif distance  < prev_distance and prev_distance-distance>4:  # Zoom out
+                        zoom_out()
+                    # Update the previous distance
+                    prev_distance = distance
+                if(keypoint_classifier_labels[hand_sign_id]=="Close"):
+                    resetZoom()
+
+                
                 # Drawing part
                 debug_image = draw_bounding_rect(use_brect, debug_image, brect)
                 debug_image = draw_landmarks(debug_image, landmark_list)
@@ -319,6 +375,10 @@ def draw_landmarks(image, landmark_point):
                 (0, 0, 0), 6)
         cv.line(image, tuple(landmark_point[7]), tuple(landmark_point[8]),
                 (255, 255, 255), 2)
+        #thumb x index finger
+        cv.line(image, tuple(landmark_point[4]), tuple(landmark_point[8]),
+                (255, 0, 0), 6)
+
 
         # Middle finger
         cv.line(image, tuple(landmark_point[9]), tuple(landmark_point[10]),
